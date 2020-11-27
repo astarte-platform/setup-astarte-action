@@ -1,0 +1,112 @@
+name: Setup Astarte instance
+description: Starts an Astarte instance to perform SDK integration testing
+inputs:
+  realm:
+    description: The name of the realm that will be created and populated. The default is test.
+    required: false
+    default: test
+  device-id:
+    description: |
+      The device id that will be registered in the realm and populated. The default is
+      xeT0nbhuTyCYzCoqD3w7Lg
+    required: false
+    default: xeT0nbhuTyCYzCoqD3w7Lg
+  interface-dir:
+    description: |
+      Path to a directory containing JSON files containing the Astarte interfaces that will be
+      installed in the realm. If empty, the standard interfaces contained in the astarte repository
+      will be installed.
+    required: false
+    default: astarte/standard-interfaces
+  register-device:
+    description: |
+      If true (default), the action will register the device and provide the user with a credentials
+      secret ready to be used, otherwise the user will be responsible of registering the device
+      using the provided pairing JWT.
+    required: false
+    default: true
+outputs:
+  realm:
+    description: The name of the realm that was created and populated.
+    value: ${{ inputs.realm }}
+  device-id:
+    description: |
+      The device id that was registered in the realm and populated.
+    value: ${{ inputs.device-id }}
+  pairing-base-url:
+    description: |
+      The base Pairing API URL.
+    value: http://localhost:4003
+  pairing-jwt:
+    description: |
+      A JWT that can be used to register a device via Pairing API
+    value: ${{ steps.jwt-generator.outputs.pairing-jwt }}
+  appengine-jwt:
+    description: |
+      A JWT that can be used to access AppEngine API
+    value: ${{ steps.jwt-generator.outputs.appengine-jwt }}
+  credentials-secret:
+    description: |
+      If register-device is true, this variable will contain the credentials secret of the
+      registered device
+    value: ${{ steps.device-registration.outputs.credentials-secret }}
+runs:
+  using: "composite"
+  steps:
+    - name: Clone astarte repository
+      shell: bash
+      run: git clone https://github.com/astarte-platform/astarte.git
+    - name: Initialize docker-compose files
+      shell: bash
+      run: docker run -v $(pwd)/astarte/compose:/compose astarte/docker-compose-initializer
+    - name: Start all Astarte services
+      shell: bash
+      run: cd astarte && docker-compose up -d
+    - name: Wait for Astarte to come up
+      shell: bash
+      run: |
+        wget -q https://github.com/astarte-platform/wait-for-astarte-docker-compose/releases/download/v1.0.0-alpha.1/wait-for-astarte-docker-compose_1.0.0-alpha.1_linux_amd64.tar.gz
+        tar xf wait-for-astarte-docker-compose_1.0.0-alpha.1_linux_amd64.tar.gz
+        ./wait-for-astarte-docker-compose
+    - name: Install astartectl
+      shell: bash
+      run: |
+        wget -q https://github.com/astarte-platform/astartectl/releases/download/v0.11.2/astartectl_linux_amd64 -O astartectl
+        chmod +x astartectl
+    - name: Create realm
+      shell: bash
+      run: |
+        REALM=${{ inputs.realm }}
+        echo "Creating realm $REALM"
+        ./astartectl utils gen-keypair $REALM
+        ./astartectl housekeeping realms create $REALM --housekeeping-url http://localhost:4001/ -p ${REALM}_public.pem -k astarte/compose/astarte-keys/housekeeping_private.pem
+        echo "REALM=$REALM" >> $GITHUB_ENV
+        sleep 5
+    - name: Generate JWTs
+      id: jwt-generator
+      shell: bash
+      run: |
+        APPENGINE_JWT=$(./astartectl utils gen-jwt appengine channels -k ${REALM}_private.pem)
+        PAIRING_JWT=$(./astartectl utils gen-jwt pairing -k test_private.pem)
+        echo "::set-output name=appengine-jwt::$(echo $APPENGINE_JWT)"
+        echo "::set-output name=pairing-jwt::$(echo $PAIRING_JWT)"
+    - name: Install interfaces
+      shell: bash
+      run: |
+        INTERFACE_DIR=${{ inputs.interface-dir }}
+
+        for i in $(ls $INTERFACE_DIR); do
+          echo "Installing $i"
+          ./astartectl realm-management interfaces install ${INTERFACE_DIR}/$i --realm-management-url http://localhost:4000 -k ${REALM}_private.pem -r $REALM
+          sleep 2
+        done
+    - name: Register device
+      id: device-registration
+      shell: bash
+      run: |
+        if [ "${{ inputs.register-device }}" = "true" ] ; then
+          CREDENTIALS_SECRET=$(./astartectl pairing agent register ${{ inputs.device-id }} --pairing-url http://localhost:4003 -k ${REALM}_private.pem -r $REALM | grep "Credentials Secret is" | cut -d '"' -f 2)
+          echo "::set-output name=credentials-secret::$(echo $CREDENTIALS_SECRET)"
+        else
+          echo "Skipping device registration"
+        fi
