@@ -1,0 +1,35 @@
+name: Setup Astarte auto-test
+on:
+  # Run on branch/tag creation
+  create:
+  push:
+    branches:
+    - master
+  pull_request:
+    branches:
+    - master
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - id: setup-astarte
+      uses: astarte-platform/setup-astarte-action@v1
+      with:
+        realm: test
+        device-id: B552uoZ5SmGQq8d6NhtzPQ
+        register-device: true
+    - name: Test setup-astarte output
+      run: |
+        REALM=${{ steps.setup-astarte.outputs.realm }}
+        echo Realm $REALM
+        DEVICE_ID=${{ steps.setup-astarte.outputs.device-id }}
+        echo Device ID $DEVICE_ID
+        PAIRING_JWT=${{ steps.setup-astarte.outputs.pairing-jwt }}
+        echo Pairing JWT $PAIRING_JWT
+        APPENGINE_JWT=${{ steps.setup-astarte.outputs.appengine-jwt }}
+        echo AppEngine JWT $APPENGINE_JWT
+        CREDENTIALS_SECRET=${{ steps.setup-astarte.outputs.credentials-secret }}
+        echo Credentials Secret $CREDENTIALS_SECRET
+        PAIRING_URL=${{ steps.setup-astarte.outputs.pairing-base-url }}
+        curl $PAIRING_URL/v1/$REALM/devices/$DEVICE_ID -H "Authorization: Bearer $CREDENTIALS_SECRET"
+      shell: bash
