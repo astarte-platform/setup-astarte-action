@@ -37,6 +37,10 @@ outputs:
     description: |
       The base Pairing API URL.
     value: http://localhost:4003
+  appengine-base-url:
+    description: |
+      The base AppEngine API URL.
+    value: http://localhost:4002
   pairing-jwt:
     description: |
       A JWT that can be used to register a device via Pairing API
